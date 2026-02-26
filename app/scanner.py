@@ -167,6 +167,10 @@ def process_message_hybrid(message: str) -> dict:
                 continue
 
         # 4. Fallback: VirusTotal
+        # 4. Fallback: VirusTotal
+        # *** এই নতুন লাইনটি যুক্ত করুন ***
+        logger.info(f"🦇 Sending {real_url} to VirusTotal for final fallback check...")
+
         vt_result = check_virustotal_v3(real_url)
         if vt_result.get("status") == "DANGER":
             logger.warning(f"🕷️ Detected by VirusTotal fallback: {real_url}")
