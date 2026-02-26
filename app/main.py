@@ -9,6 +9,7 @@ app = FastAPI(title="Prohory Scanner Microservice", version="2.0")
 class ScanRequestSync(BaseModel):
     message: str
 
+@app.head("/")
 @app.get("/")
 def read_root():
     return {"status": "Prohory API is running perfectly."}
