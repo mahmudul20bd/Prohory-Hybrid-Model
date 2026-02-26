@@ -97,12 +97,26 @@ def process_message_hybrid(message: str) -> dict:
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
             
-        # *** UPDATED HEURISTIC: Smart Flagging (No Direct Block) ***
+        # *** THE ULTIMATE HEURISTIC: Liveness + File Check ***
         dangerous_extensions = ['.apk', '.exe', '.bat', '.pdf'] 
         if any(real_url.lower().endswith(ext) for ext in dangerous_extensions):
-            logger.info(f"📁 [File Detected] {real_url} contains a file extension. Passing to VirusTotal for deep file scanning.")
-            # খেয়াল করুন: আমরা এখান থেকে DANGER এবং continue মুছে দিয়েছি। 
-            # ফলে এটি সরাসরি ব্লক না হয়ে নিচের ধাপগুলো (GSB, VirusTotal) পার হয়ে যাবে!
+            logger.info(f"📁 [File Detected] Checking if {real_url} is actually alive...")
+            try:
+                # ফাইলটা ইন্টারনেটে আছে কি না, তা চেক করা (ডাউনলোড না করেই)
+                file_resp = requests.head(real_url, timeout=5, allow_redirects=True)
+                if file_resp.status_code >= 400:
+                    raise Exception("Dead link")
+                logger.info("✅ File is alive and valid. Passing to VirusTotal for deep virus scanning...")
+                # জ্যান্ত ফাইল হলে সে নিচের ধাপে (VirusTotal-এ) যাবে
+            except Exception as e:
+                logger.warning(f"⚠️ [Dead File Link] {real_url} is a fake or expired file link!")
+                results.append({
+                    "url": real_url, 
+                    "status": "DANGER", 
+                    "reason": "Dead/Fake file link detected. Likely an expired phishing attempt."
+                })
+                is_danger_found = True
+                continue # ডেড লিংক হলে সরাসরি ব্লক!
             
         # *** 0.5. Typosquatting (Brand Clone) Check ***
         typo_check = check_typosquatting(real_url)
