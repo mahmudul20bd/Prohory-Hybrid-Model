@@ -11,22 +11,22 @@ from app.api_integrations import (
     check_google_safe_browsing, check_virustotal_v3, fetch_page_content_advanced
 )
 
-# লগিং সেটআপ করা
+# লগিং সেটআপ করা (Render-এ প্রফেশনাল লগ দেখার জন্য)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - [%(levelname)s] - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger("ProhoryScanner")
-load_dotenv()
 
+load_dotenv()
 
 def analyze_with_huggingface(text: str) -> float:
     """Step 1 & Step 6: CyberAware HF Space API Integration"""
     HF_API_URL = os.getenv("HF_API_URL")
     
     if not HF_API_URL or "hf.space" not in HF_API_URL:
-        print("Warning: Real API URL missing. Returning dummy score.")
+        logger.warning("Real API URL missing. Returning dummy score.")
         return 0.75 
 
     payload = {"message": text}
@@ -49,17 +49,17 @@ def analyze_with_huggingface(text: str) -> float:
                 if confidence > 1.0:
                     confidence = confidence / 100.0
             
-            print(f"HF Space API Response -> Result: {result_label}, Confidence: {confidence:.2f}")
+            logger.info(f"HF Space API Response -> Result: {result_label}, Confidence: {confidence:.2f}")
             
             if result_label in ["SPAM", "DANGER", "SUSPICIOUS"]:
                 return confidence
             else:
                 return 0.0 
         else:
-            print(f"HF Space API Error ({response.status_code}): {response.text}")
+            logger.error(f"HF Space API Error ({response.status_code}): {response.text}")
             return 0.0
     except Exception as e:
-        print(f"HF Space Connection Error: {e}")
+        logger.error(f"HF Space Connection Error: {e}")
         return 0.0
     
 
@@ -75,7 +75,7 @@ def process_message_hybrid(message: str) -> dict:
         # *** OTP Bypass Logic ***
         lower_msg = message.lower()
         if "otp" in lower_msg or "ওটিপি" in lower_msg or "code" in lower_msg:
-            print("Detected as standard OTP message. Bypassing AI suspicion.")
+            logger.info("📩 Detected as standard OTP message. Bypassing AI suspicion.")
             return {
                 "final_verdict": "SAFE", 
                 "ai_confidence": initial_score, 
@@ -93,7 +93,7 @@ def process_message_hybrid(message: str) -> dict:
         
         # 0. Global Whitelist Check
         if is_whitelisted(real_url):
-            print(f"[{real_url}] is a Trusted Domain. Bypassing security checks.")
+            logger.info(f"✅ [{real_url}] is a Trusted Domain. Bypassing security checks.")
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
             
@@ -101,7 +101,7 @@ def process_message_hybrid(message: str) -> dict:
         typo_check = check_typosquatting(real_url)
         if typo_check["is_typosquat"]:
             brand = typo_check["brand"]
-            print(f"Typosquatting Detected: {real_url} is faking {brand}")
+            logger.warning(f"🎭 Typosquatting Detected: {real_url} is faking {brand}")
             results.append({
                 "url": real_url, 
                 "status": "DANGER", 
@@ -113,6 +113,7 @@ def process_message_hybrid(message: str) -> dict:
         # 1. WHOIS Risk Check 
         whois_data = get_domain_age_risk(real_url)
         if whois_data['risk'] == "HIGH":
+            logger.warning(f"⚠️ Suspiciously new domain detected: {real_url}")
             results.append({"url": real_url, "status": "DANGER", "reason": f"Suspiciously new domain. {whois_data['message']}"})
             is_danger_found = True
             continue
@@ -120,11 +121,12 @@ def process_message_hybrid(message: str) -> dict:
         # *** 1.5. SSL Risk Check ***
         ssl_data = check_ssl_risk(real_url)
         if ssl_data.get("is_free_cert"):
-            print(f"Warning: Free/Suspicious SSL Certificate detected for {real_url}")
+            logger.warning(f"🔓 Free/Suspicious SSL Certificate detected for {real_url}")
             
         # 2. Google Safe Browsing (GSB) Check
         gsb_status = check_google_safe_browsing(real_url)
         if gsb_status == "DANGER":
+            logger.warning(f"🛑 Flagged by Google Safe Browsing: {real_url}")
             results.append({"url": real_url, "status": "DANGER", "reason": "Flagged by Google Safe Browsing"})
             is_danger_found = True
             continue
@@ -133,38 +135,39 @@ def process_message_hybrid(message: str) -> dict:
         if gsb_status == "SAFE" and initial_score >= 0.70:
             
             if initial_score >= 0.90:
+                logger.warning(f"🚨 [Direct Block] High AI Confidence ({initial_score}) for {real_url}. Skipping scraping!")
                 results.append({"url": real_url, "status": "DANGER", "reason": f"Definitive malicious text detected (AI Score: {initial_score}). Link blocked."})
                 is_danger_found = True
                 continue
 
-            print(f"Model suspects the message (Score: {initial_score}). Triggering Advanced Deep Scraping...")
+            logger.info(f"🔍 Model suspects the message (Score: {initial_score}). Triggering Advanced Deep Scraping for {real_url}...")
             scraped_data = fetch_page_content_advanced(real_url)
             scraped_text = scraped_data.get("text", "")
             
             # *** Phishing Trap Detection ***
-            # যদি সাইটে পাসওয়ার্ড চায় এবং SSL ফ্রি হয়, অথবা AI আগে থেকেই সন্দেহ করে থাকে
             if scraped_data.get("has_password_form") and (initial_score >= 0.75 or ssl_data.get("is_free_cert")):
-                print("Phishing Trap Detected: Password form found on suspicious site!")
+                logger.warning(f"🎣 Phishing Trap Detected for {real_url}: Password form found on suspicious site!")
                 results.append({"url": real_url, "status": "DANGER", "reason": "Phishing Trap! Password form found on suspicious/untrusted site."})
                 is_danger_found = True
                 continue
 
             if scraped_text:
                 second_score = analyze_with_huggingface(scraped_text)
-                print(f"Second AI Scan on Page Content -> Score: {second_score} (OCR Used: {scraped_data.get('ocr_used')})")
+                logger.info(f"🧠 Second AI Scan on Page Content -> Score: {second_score} (OCR Used: {scraped_data.get('ocr_used')})")
                 
                 if second_score >= 0.70:
                     reason = "Hidden Threat detected on page content"
                     if scraped_data.get("ocr_used"):
                         reason += " (detected via OCR Image Analysis)"
                     
+                    logger.warning(f"🦠 Hidden Threat Confirmed by AI on {real_url}")
                     results.append({"url": real_url, "status": "DANGER", "reason": reason})
                     is_danger_found = True
                     continue
                 else:
-                    print("Initial prediction was a False Positive. The page is actually safe.")
+                    logger.info(f"🛡️ Initial prediction was a False Positive. The page {real_url} is actually safe.")
             else:
-                print("Scraping failed or timed out.")
+                logger.warning(f"⏳ Scraping failed or timed out for {real_url}.")
                 results.append({"url": real_url, "status": "DANGER", "reason": "Suspicious message and site is unresponsive/hidden."})
                 is_danger_found = True
                 continue
@@ -172,6 +175,7 @@ def process_message_hybrid(message: str) -> dict:
         # 4. Fallback: VirusTotal
         vt_result = check_virustotal_v3(real_url)
         if vt_result.get("status") == "DANGER":
+            logger.warning(f"🕷️ Detected by VirusTotal fallback: {real_url}")
             results.append({"url": real_url, "status": "DANGER", "reason": "Detected by VirusTotal fallback"})
             is_danger_found = True
             continue
