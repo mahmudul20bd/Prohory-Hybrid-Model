@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
 # প্রজেক্টের র্ওয়ার্কিং ডিরেক্টরি সেট করা
 WORKDIR /code
+RUN apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-ben
 
 # রিকোয়ারমেন্টস কপি করে ইনস্টল করা
 COPY requirements.txt /code/requirements.txt

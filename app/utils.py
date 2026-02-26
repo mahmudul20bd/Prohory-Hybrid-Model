@@ -4,18 +4,17 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
-
-import re
+import ssl
+import socket
+import difflib
 
 def extract_urls(text: str) -> list:
     """মেসেজ থেকে URL খুঁজে বের করার আপডেটেড রেগুলার এক্সপ্রেশন"""
-    # এটি http, www ছাড়াও সাধারণ cutt.ly, bit.ly বা যেকোনো ডোমেইন নিখুঁতভাবে ক্যাচ করবে
     url_pattern = re.compile(r'(?:https?://)?(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?')
     urls = url_pattern.findall(text)
     
     clean_urls = []
     for url in urls:
-        # লিংকের শেষে ভুল করে বাংলা দাঁড়ি (।), কমা (,) বা ডট (.) চলে আসলে তা কেটে ফেলে আসল লিংক বের করা
         clean_url = url.rstrip('.,।!?"\'')
         clean_urls.append(clean_url)
         
@@ -58,7 +57,6 @@ def get_domain_age_risk(url: str) -> dict:
         if isinstance(creation_date, list):
             creation_date = creation_date[0]
 
-        # ******* THE FIX: Timezone মুছে ফেলা *******
         if creation_date.tzinfo is not None:
             creation_date = creation_date.replace(tzinfo=None)
 
@@ -74,12 +72,12 @@ def get_domain_age_risk(url: str) -> dict:
     except Exception as e:
         print(f"WHOIS Error for {url}: {e}")
         return {"risk": "UNKNOWN", "age_days": -1, "message": "Failed to fetch domain age"}
-    
-    # বিশ্বের সবচেয়ে পরিচিত ও নিরাপদ ওয়েবসাইটগুলোর তালিকা
+
+# বিশ্বের সবচেয়ে পরিচিত ও নিরাপদ ওয়েবসাইটগুলোর তালিকা
 WHITELIST_DOMAINS = {
     "zoom.us", "google.com", "youtube.com", "facebook.com", 
     "microsoft.com", "github.com", "linkedin.com", "meet.google.com",
-    "bkash.com", "nagad.com.bd" # বাংলাদেশের ট্রাস্টেড সাইট
+    "bkash.com", "nagad.com.bd"
 }
 
 def is_whitelisted(url: str) -> bool:
@@ -89,10 +87,51 @@ def is_whitelisted(url: str) -> bool:
         if domain.startswith("www."):
             domain = domain[4:]
             
-        # us06web.zoom.us এর মতো সাব-ডোমেইনগুলোও যাতে কাজ করে
         for wl_domain in WHITELIST_DOMAINS:
             if domain == wl_domain or domain.endswith("." + wl_domain):
                 return True
         return False
     except:
         return False
+
+def check_typosquatting(url: str) -> dict:
+    """ব্র্যান্ড ক্লোনিং বা টাইপোকোয়াটিং চেক"""
+    try:
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        
+        domain_name = domain.split('.')[0]
+
+        for brand in WHITELIST_DOMAINS:
+            brand_name = brand.split('.')[0]
+            similarity = difflib.SequenceMatcher(None, domain_name, brand_name).ratio()
+            
+            if similarity >= 0.80 and domain != brand and not domain.endswith("." + brand):
+                return {"is_typosquat": True, "brand": brand, "similarity": similarity}
+                
+        return {"is_typosquat": False}
+    except:
+        return {"is_typosquat": False}
+
+def check_ssl_risk(url: str) -> dict:
+    """SSL সার্টিফিকেটের ধরন এবং বয়স চেক"""
+    try:
+        domain = urlparse(url).netloc
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        context = ssl.create_default_context()
+        with socket.create_connection((domain, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                cert = ssock.getpeercert()
+                
+                issuer = dict(x[0] for x in cert['issuer'])
+                issuer_org = issuer.get('organizationName', '').lower()
+                
+                # Let's Encrypt বা ZeroSSL ফ্রি সার্টিফিকেট স্ক্যামাররা বেশি ব্যবহার করে
+                is_free_cert = "let's encrypt" in issuer_org or "zero ssl" in issuer_org
+                
+                return {"success": True, "is_free_cert": is_free_cert, "issuer": issuer_org}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

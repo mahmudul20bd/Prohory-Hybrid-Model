@@ -1,22 +1,19 @@
 import os
-from dotenv import load_dotenv
-from app.utils import extract_urls, unshorten_url, get_domain_age_risk
-from app.api_integrations import check_google_safe_browsing, check_virustotal_v3, fetch_page_content
-from app.utils import extract_urls, unshorten_url, get_domain_age_risk, is_whitelisted
-
-load_dotenv()
-
-import os
 import requests
 from dotenv import load_dotenv
+
+from app.utils import (
+    extract_urls, unshorten_url, get_domain_age_risk, 
+    is_whitelisted, check_typosquatting, check_ssl_risk
+)
+from app.api_integrations import (
+    check_google_safe_browsing, check_virustotal_v3, fetch_page_content_advanced
+)
 
 load_dotenv()
 
 def analyze_with_huggingface(text: str) -> float:
-    """
-    Step 1 & Step 6: CyberAware HF Space API Integration
-    স্ট্রিং পার্সেন্টেজ ("100.00%") ফিক্স করা হয়েছে।
-    """
+    """Step 1 & Step 6: CyberAware HF Space API Integration"""
     HF_API_URL = os.getenv("HF_API_URL")
     
     if not HF_API_URL or "hf.space" not in HF_API_URL:
@@ -34,10 +31,10 @@ def analyze_with_huggingface(text: str) -> float:
             result_label = str(data.get("result", "")).upper()
             raw_confidence = data.get("confidence", 0.0)
             
-            # 100.00% বা স্ট্রিং ফরম্যাটকে 0.0 - 1.0 স্কেলে কনভার্ট করার লজিক
+            # String percentage fix
             if isinstance(raw_confidence, str):
                 clean_str = raw_confidence.replace('%', '').strip()
-                confidence = float(clean_str) / 100.0  # 100.00 হবে 1.0
+                confidence = float(clean_str) / 100.0  
             else:
                 confidence = float(raw_confidence)
                 if confidence > 1.0:
@@ -49,37 +46,60 @@ def analyze_with_huggingface(text: str) -> float:
                 return confidence
             else:
                 return 0.0 
-            
         else:
             print(f"HF Space API Error ({response.status_code}): {response.text}")
             return 0.0
-            
     except Exception as e:
         print(f"HF Space Connection Error: {e}")
         return 0.0
     
+
 def process_message_hybrid(message: str) -> dict:
+    """আল্ট্রা-অ্যাডভান্সড প্রহরী স্ক্যানিং ইঞ্জিন (Version 2.0)"""
+    
     # Step 1: Initial AI Scan
     initial_score = analyze_with_huggingface(message)
     urls = extract_urls(message)
     
     # মেসেজে লিংক না থাকলে শুধু AI এর কথার ওপর ভিত্তি করে রেজাল্ট
     if not urls:
+        # *** OTP Bypass Logic ***
+        lower_msg = message.lower()
+        if "otp" in lower_msg or "ওটিপি" in lower_msg or "code" in lower_msg:
+            print("Detected as standard OTP message. Bypassing AI suspicion.")
+            return {
+                "final_verdict": "SAFE", 
+                "ai_confidence": initial_score, 
+                "details": "OTP Message (No links)"
+            }
+
         status = "DANGER" if initial_score >= 0.70 else "SAFE"
         return {"final_verdict": status, "ai_confidence": initial_score, "details": "Text only analysis"}
 
-    # *** এই দুটি লাইন লুপের আগে থাকতেই হবে! ***
     results = []
     is_danger_found = False
 
     for url in urls:
         real_url = unshorten_url(url)
         
-        # 0. Global Whitelist Check (The Fix)
+        # 0. Global Whitelist Check
         if is_whitelisted(real_url):
             print(f"[{real_url}] is a Trusted Domain. Bypassing security checks.")
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
+            
+        # *** 0.5. Typosquatting (Brand Clone) Check ***
+        typo_check = check_typosquatting(real_url)
+        if typo_check["is_typosquat"]:
+            brand = typo_check["brand"]
+            print(f"Typosquatting Detected: {real_url} is faking {brand}")
+            results.append({
+                "url": real_url, 
+                "status": "DANGER", 
+                "reason": f"Brand Impersonation! Trying to fake '{brand}'"
+            })
+            is_danger_found = True
+            continue 
         
         # 1. WHOIS Risk Check 
         whois_data = get_domain_age_risk(real_url)
@@ -88,31 +108,48 @@ def process_message_hybrid(message: str) -> dict:
             is_danger_found = True
             continue
             
-        # 2. Google Safe Browsing (GSB) Fast Check
+        # *** 1.5. SSL Risk Check ***
+        ssl_data = check_ssl_risk(real_url)
+        if ssl_data.get("is_free_cert"):
+            print(f"Warning: Free/Suspicious SSL Certificate detected for {real_url}")
+            
+        # 2. Google Safe Browsing (GSB) Check
         gsb_status = check_google_safe_browsing(real_url)
         if gsb_status == "DANGER":
             results.append({"url": real_url, "status": "DANGER", "reason": "Flagged by Google Safe Browsing"})
             is_danger_found = True
             continue
             
-        # 3. Conflict Resolution & Deep Scraping
+        # 3. Conflict Resolution & Deep Scraping (Advanced)
         if gsb_status == "SAFE" and initial_score >= 0.70:
             
-            # The Ultimate Trust Logic
             if initial_score >= 0.90:
                 results.append({"url": real_url, "status": "DANGER", "reason": f"Definitive malicious text detected (AI Score: {initial_score}). Link blocked."})
                 is_danger_found = True
                 continue
 
-            print(f"Model suspects the message (Score: {initial_score}). Triggering Deep Scraping...")
-            scraped_text = fetch_page_content(real_url)
+            print(f"Model suspects the message (Score: {initial_score}). Triggering Advanced Deep Scraping...")
+            scraped_data = fetch_page_content_advanced(real_url)
+            scraped_text = scraped_data.get("text", "")
             
+            # *** Phishing Trap Detection ***
+            # যদি সাইটে পাসওয়ার্ড চায় এবং SSL ফ্রি হয়, অথবা AI আগে থেকেই সন্দেহ করে থাকে
+            if scraped_data.get("has_password_form") and (initial_score >= 0.75 or ssl_data.get("is_free_cert")):
+                print("Phishing Trap Detected: Password form found on suspicious site!")
+                results.append({"url": real_url, "status": "DANGER", "reason": "Phishing Trap! Password form found on suspicious/untrusted site."})
+                is_danger_found = True
+                continue
+
             if scraped_text:
                 second_score = analyze_with_huggingface(scraped_text)
-                print(f"Second AI Scan on Page Content -> Score: {second_score}")
+                print(f"Second AI Scan on Page Content -> Score: {second_score} (OCR Used: {scraped_data.get('ocr_used')})")
                 
                 if second_score >= 0.70:
-                    results.append({"url": real_url, "status": "DANGER", "reason": "Hidden Threat detected on page content"})
+                    reason = "Hidden Threat detected on page content"
+                    if scraped_data.get("ocr_used"):
+                        reason += " (detected via OCR Image Analysis)"
+                    
+                    results.append({"url": real_url, "status": "DANGER", "reason": reason})
                     is_danger_found = True
                     continue
                 else:
@@ -130,10 +167,9 @@ def process_message_hybrid(message: str) -> dict:
             is_danger_found = True
             continue
         
-        # সব টেস্ট পাস করলে বা AI এর সেকেন্ড স্ক্যান সেফ বললে
+        # সব টেস্ট পাস করলে লিংকটি সেফ
         results.append({"url": real_url, "status": "SAFE", "reason": "Passed all security layers"})
 
-    # ফাইনাল ভার্ডিক্ট: লিংকগুলোর যেকোনো একটি যদি DANGER হয়, তবেই পুরো মেসেজ DANGER
     final_status = "DANGER" if is_danger_found else "SAFE"
     
     return {
