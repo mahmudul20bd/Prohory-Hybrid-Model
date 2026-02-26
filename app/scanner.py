@@ -133,12 +133,6 @@ def process_message_hybrid(message: str) -> dict:
             
         # 3. Conflict Resolution & Deep Scraping (Advanced)
         if gsb_status == "SAFE" and initial_score >= 0.70:
-            
-            if initial_score >= 0.90:
-                logger.warning(f"🚨 [Direct Block] High AI Confidence ({initial_score}) for {real_url}. Skipping scraping!")
-                results.append({"url": real_url, "status": "DANGER", "reason": f"Definitive malicious text detected (AI Score: {initial_score}). Link blocked."})
-                is_danger_found = True
-                continue
 
             logger.info(f"🔍 Model suspects the message (Score: {initial_score}). Triggering Advanced Deep Scraping for {real_url}...")
             scraped_data = fetch_page_content_advanced(real_url)
