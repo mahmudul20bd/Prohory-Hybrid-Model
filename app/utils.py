@@ -9,8 +9,9 @@ import socket
 import difflib
 
 def extract_urls(text: str) -> list:
-    """মেসেজ থেকে URL খুঁজে বের করার আপডেটেড রেগুলার এক্সপ্রেশন"""
-    url_pattern = re.compile(r'(?:https?://)?(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?')
+    """আপডেটেড Regex: এটি .com এর পাশাপাশি IP Address (যেমন: 103.120.45.68) ও ক্যাচ করবে"""
+    # IP Address এবং সাধারণ ডোমেইন দুটোই ধরার লজিক
+    url_pattern = re.compile(r'(?:https?://)?(?:(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?(?:/[^\s]*)?')
     urls = url_pattern.findall(text)
     
     clean_urls = []
