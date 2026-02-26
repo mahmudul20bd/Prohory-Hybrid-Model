@@ -1,5 +1,6 @@
 import os
 import requests
+import logging
 from dotenv import load_dotenv
 
 from app.utils import (
@@ -10,7 +11,15 @@ from app.api_integrations import (
     check_google_safe_browsing, check_virustotal_v3, fetch_page_content_advanced
 )
 
+# লগিং সেটআপ করা
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [%(levelname)s] - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("ProhoryScanner")
 load_dotenv()
+
 
 def analyze_with_huggingface(text: str) -> float:
     """Step 1 & Step 6: CyberAware HF Space API Integration"""
