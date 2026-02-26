@@ -91,23 +91,18 @@ def process_message_hybrid(message: str) -> dict:
     for url in urls:
         real_url = unshorten_url(url)
         
-        # 0. Global Whitelist Check
+       # 0. Global Whitelist Check
         if is_whitelisted(real_url):
             logger.info(f"✅ [{real_url}] is a Trusted Domain. Bypassing security checks.")
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
             
-        # *** THE ULTIMATE PATCH: Heuristic File Extension Check ***
+        # *** UPDATED HEURISTIC: Smart Flagging (No Direct Block) ***
         dangerous_extensions = ['.apk', '.exe', '.bat', '.pdf'] 
         if any(real_url.lower().endswith(ext) for ext in dangerous_extensions):
-            logger.warning(f"⚠️ [Heuristic Alert] Suspicious file extension found in {real_url}")
-            results.append({
-                "url": real_url, 
-                "status": "DANGER", 
-                "reason": "Suspicious file download link detected (Heuristic Rule)."
-            })
-            is_danger_found = True
-            continue # সরাসরি ব্লক! নিচের কোনো ধাপে (WHOIS/Scraping/VT) আর যাবেই না!
+            logger.info(f"📁 [File Detected] {real_url} contains a file extension. Passing to VirusTotal for deep file scanning.")
+            # খেয়াল করুন: আমরা এখান থেকে DANGER এবং continue মুছে দিয়েছি। 
+            # ফলে এটি সরাসরি ব্লক না হয়ে নিচের ধাপগুলো (GSB, VirusTotal) পার হয়ে যাবে!
             
         # *** 0.5. Typosquatting (Brand Clone) Check ***
         typo_check = check_typosquatting(real_url)
