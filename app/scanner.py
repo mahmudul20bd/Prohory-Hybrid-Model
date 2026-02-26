@@ -97,6 +97,18 @@ def process_message_hybrid(message: str) -> dict:
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
             
+        # *** THE ULTIMATE PATCH: Heuristic File Extension Check ***
+        dangerous_extensions = ['.apk', '.exe', '.bat', '.pdf'] 
+        if any(real_url.lower().endswith(ext) for ext in dangerous_extensions):
+            logger.warning(f"⚠️ [Heuristic Alert] Suspicious file extension found in {real_url}")
+            results.append({
+                "url": real_url, 
+                "status": "DANGER", 
+                "reason": "Suspicious file download link detected (Heuristic Rule)."
+            })
+            is_danger_found = True
+            continue # সরাসরি ব্লক! নিচের কোনো ধাপে (WHOIS/Scraping/VT) আর যাবেই না!
+            
         # *** 0.5. Typosquatting (Brand Clone) Check ***
         typo_check = check_typosquatting(real_url)
         if typo_check["is_typosquat"]:
@@ -167,8 +179,6 @@ def process_message_hybrid(message: str) -> dict:
                 continue
 
         # 4. Fallback: VirusTotal
-        # 4. Fallback: VirusTotal
-        # *** এই নতুন লাইনটি যুক্ত করুন ***
         logger.info(f"🦇 Sending {real_url} to VirusTotal for final fallback check...")
 
         vt_result = check_virustotal_v3(real_url)
