@@ -148,7 +148,9 @@ def process_message_hybrid(message: str) -> dict:
 
             logger.info(f"🔍 Model suspects the message (Score: {initial_score}). Triggering Advanced Deep Scraping for {real_url}...")
             scraped_data = fetch_page_content_advanced(real_url)
-            scraped_text = scraped_data.get("text", "")
+            
+            # .strip() যুক্ত করা হলো যাতে শুধু স্পেস থাকলে সেটা ফাঁকা হয়ে যায় (Empty message error ফিক্স)
+            scraped_text = scraped_data.get("text", "").strip() 
             
             # *** Phishing Trap Detection ***
             if scraped_data.get("has_password_form") and (initial_score >= 0.75 or ssl_data.get("is_free_cert")):
@@ -157,7 +159,17 @@ def process_message_hybrid(message: str) -> dict:
                 is_danger_found = True
                 continue
 
-            if scraped_text:
+            # *** UPDATED: Bot Cloaking / CAPTCHA Detection (Balanced) ***
+            cloaking_keywords = ["cloudflare", "verify you are human", "just a moment", "challenge-platform", "security check", "robot"]
+            is_bot_challenge = any(keyword in scraped_text.lower() for keyword in cloaking_keywords)
+            
+            if is_bot_challenge:
+                logger.warning(f"🤖 CAPTCHA/Cloudflare detected on {real_url}. AI might be wrong. Deferring to VirusTotal...")
+                # এখানে আমরা সরাসরি ব্লক (continue) করব না! 
+                # কারণ AI ভুল করতে পারে। আমরা শুধু Second AI Scan টা স্কিপ করব এবং VirusTotal-কে চেক করতে দেব।
+                pass 
+                
+            elif scraped_text:
                 second_score = analyze_with_huggingface(scraped_text)
                 logger.info(f"🧠 Second AI Scan on Page Content -> Score: {second_score} (OCR Used: {scraped_data.get('ocr_used')})")
                 
@@ -173,7 +185,7 @@ def process_message_hybrid(message: str) -> dict:
                 else:
                     logger.info(f"🛡️ Initial prediction was a False Positive. The page {real_url} is actually safe.")
             else:
-                logger.warning(f"⏳ Scraping failed or timed out for {real_url}.")
+                logger.warning(f"⏳ Scraping failed, empty page, or timed out for {real_url}.")
                 results.append({"url": real_url, "status": "DANGER", "reason": "Suspicious message and site is unresponsive/hidden."})
                 is_danger_found = True
                 continue
