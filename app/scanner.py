@@ -22,13 +22,13 @@ logger = logging.getLogger("ProhoryScanner")
 
 load_dotenv()
 
-def analyze_with_huggingface(text: str) -> float:
-    """Step 1 & Step 6: CyberAware HF Space API Integration"""
+def analyze_with_huggingface(text: str) -> dict:
+    """Step 1: CyberAware HF Space API Integration (Returns Label & Confidence)"""
     HF_API_URL = os.getenv("HF_API_URL")
     
     if not HF_API_URL or "hf.space" not in HF_API_URL:
-        logger.warning("Real API URL missing. Returning dummy score.")
-        return 0.75 
+        logger.warning("Real API URL missing. Returning SAFE.")
+        return {"label": "SAFE", "confidence": 0.0}
 
     payload = {"message": text}
     
@@ -38,7 +38,7 @@ def analyze_with_huggingface(text: str) -> float:
         if response.status_code == 200:
             data = response.json()
             
-            result_label = str(data.get("result", "")).upper()
+            result_label = str(data.get("result", "SAFE")).upper()
             raw_confidence = data.get("confidence", 0.0)
             
             # String percentage fix
@@ -50,18 +50,15 @@ def analyze_with_huggingface(text: str) -> float:
                 if confidence > 1.0:
                     confidence = confidence / 100.0
             
-            logger.info(f"HF Space API Response -> Result: {result_label}, Confidence: {confidence:.2f}")
+            logger.info(f"🧠 AI Decision -> Label: {result_label}, Confidence: {confidence:.2f}")
             
-            if result_label in ["SPAM", "DANGER", "SUSPICIOUS"]:
-                return confidence
-            else:
-                return 0.0 
+            return {"label": result_label, "confidence": confidence}
         else:
             logger.error(f"HF Space API Error ({response.status_code}): {response.text}")
-            return 0.0
+            return {"label": "SAFE", "confidence": 0.0}
     except Exception as e:
         logger.error(f"HF Space Connection Error: {e}")
-        return 0.0
+        return {"label": "SAFE", "confidence": 0.0}
     
 
 def process_message_hybrid(message: str) -> dict:
