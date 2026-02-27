@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 from app.utils import (
@@ -97,9 +98,14 @@ def process_message_hybrid(message: str) -> dict:
             results.append({"url": real_url, "status": "SAFE", "reason": "Trusted Global Whitelist Domain"})
             continue
             
-        # *** THE ULTIMATE HEURISTIC: Liveness + File Check ***
-        dangerous_extensions = ['.apk', '.exe', '.bat', '.pdf'] 
-        if any(real_url.lower().endswith(ext) for ext in dangerous_extensions):
+        # *** THE ULTIMATE HEURISTIC: Liveness + Smart File Check ***
+        dangerous_extensions = ['.apk', '.exe', '.bat', '.pdf', '.zip', '.rar', '.msi', '.vbs', '.sh'] 
+        
+        # urlparse ব্যবহার করে লিংকের প্যারামিটার (?alt=media) বাদ দিয়ে শুধু আসল পাথ বের করা
+        parsed_url = urlparse(real_url.lower())
+        actual_path = parsed_url.path 
+        
+        if any(actual_path.endswith(ext) for ext in dangerous_extensions):
             logger.info(f"📁 [File Detected] Checking if {real_url} is actually alive...")
             try:
                 # ফাইলটা ইন্টারনেটে আছে কি না, তা চেক করা (ডাউনলোড না করেই)
